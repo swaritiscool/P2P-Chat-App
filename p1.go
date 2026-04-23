@@ -5,7 +5,34 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
+
+const (
+	reset   = "\033[0m"
+	cyan    = "\033[36m"
+	green   = "\033[32m"
+	yellow  = "\033[33m"
+	magenta = "\033[35m"
+	bold    = "\033[1m"
+)
+
+func savePeerIP(ip string) {
+	file, err := os.Create("peer_ip.txt")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	file.WriteString(ip)
+}
+
+func loadPeerIP() string {
+	data, err := os.ReadFile("peer_ip.txt")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
 
 func listen() {
 	listener, err := net.Listen("tcp", ":9673")
@@ -15,7 +42,7 @@ func listen() {
 	}
 	defer listener.Close()
 
-	fmt.Println("Listening for peers on port 9673...")
+	fmt.Println(bold + green + "Listening for peers on port 9673..." + reset)
 
 	for {
 		conn, err := listener.Accept()
@@ -31,19 +58,17 @@ func handlePeer(conn net.Conn) {
 	defer conn.Close()
 
 	remoteAddr := conn.RemoteAddr().String()
-	fmt.Printf("\n--- New Chat Started with %s ---\n", remoteAddr)
+	peerIP := remoteAddr[:len(remoteAddr)-6]
+	savePeerIP(peerIP)
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		fmt.Printf("\n[%s]: %s\n", remoteAddr, scanner.Text())
-		fmt.Print("Me: ")
-	}
+	fmt.Printf(bold+cyan+"\n--- New Chat Started with %s ---\n"+reset, remoteAddr)
+	chat(conn)
 }
 
 func send(target string, msg string) {
 	conn, err := net.Dial("tcp", target+":9673")
 	if err != nil {
-		fmt.Printf("\nCould not connect to %s: %v\n", target, err)
+		fmt.Printf(bold+magenta+"\nCould not connect to %s: %v\n"+reset, target, err)
 		return
 	}
 	defer conn.Close()
@@ -56,9 +81,14 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Print("Enter peer IP to start chat: ")
-	scanner.Scan()
-	targetIP := scanner.Text()
+	targetIP := loadPeerIP()
+	if targetIP == "" {
+		fmt.Print(bold + yellow + "Enter peer IP to start chat: " + reset)
+		scanner.Scan()
+		targetIP = scanner.Text()
+	} else {
+		fmt.Printf(bold+green+"Using saved peer IP: %s\n"+reset, targetIP)
+	}
 
 	conn, err := net.Dial("tcp", targetIP+":9673")
 	if err != nil {
@@ -66,21 +96,26 @@ func main() {
 		return
 	}
 
-	fmt.Println("Connected! You can now type messages.")
+	fmt.Println(bold + green + "Connected! You can now type messages." + reset)
 	chat(conn)
 }
 
 func chat(conn net.Conn) {
-	defer conn.Close()
-	scanner := bufio.NewScanner(os.Stdin)
+	go func() {
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			fmt.Printf(bold+cyan+"[%s]:"+reset+" %s\n", conn.RemoteAddr().String(), scanner.Text())
+			fmt.Print(bold + yellow + ">>> " + reset)
+		}
+	}()
 
+	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print("Me: ")
+		fmt.Print(bold + yellow + ">>> " + reset)
 		if !scanner.Scan() {
 			break
 		}
 		msg := scanner.Text()
-
 		fmt.Fprintln(conn, msg)
 	}
 }
