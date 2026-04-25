@@ -18,22 +18,7 @@ const (
 	bold    = "\033[1m"
 )
 
-func savePeerIP(ip string) {
-	file, err := os.Create("peer_ip.txt")
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	file.WriteString(ip)
-}
-
-func loadPeerIP() string {
-	data, err := os.ReadFile("peer_ip.txt")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
-}
+var activeConn = make(chan net.Conn, 1)
 
 func listen() {
 	listener, err := net.Listen("tcp", ":9673")
@@ -45,46 +30,32 @@ func listen() {
 
 	fmt.Println(bold + green + "Listening for peers on port 9673..." + reset)
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Connection error:", err)
-			continue
-		}
-		go handlePeer(conn)
-	}
-}
+	conn, _ := listener.Accept()
+	activeConn <- conn
 
-func handlePeer(conn net.Conn) {
-	defer conn.Close()
-
-	remoteAddr := conn.RemoteAddr().String()
-	peerIP := remoteAddr[:len(remoteAddr)-6]
-	savePeerIP(peerIP)
-
-	fmt.Printf(bold+cyan+"\n--- New Chat Started with %s ---\n"+reset, remoteAddr)
-	chat(conn)
 }
 
 func main() {
 	go listen()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	go func() {
 
-	targetIP := loadPeerIP()
-	if targetIP == "" {
-		fmt.Print(bold + yellow + "Enter peer IP to start chat: " + reset)
-		scanner.Scan()
-		targetIP = scanner.Text()
-	} else {
-		fmt.Printf(bold+green+"Using saved peer IP: %s\n"+reset, targetIP)
-	}
+		scanner := bufio.NewScanner(os.Stdin)
+		targetIP := ""
+		if targetIP == "" {
+			fmt.Print(bold + yellow + "Enter peer IP to start chat: " + reset)
+			scanner.Scan()
+			targetIP = scanner.Text()
+		}
 
-	conn, err := net.Dial("tcp", targetIP+":9673")
-	if err != nil {
-		fmt.Println("Error connecting:", err)
-		return
-	}
+		conn, err := net.Dial("tcp", targetIP+":9673")
+		if err == nil {
+			fmt.Println("Connection Successful")
+			activeConn <- conn
+		}
+	}()
+
+	conn := <-activeConn
 
 	fmt.Println(bold + green + "Connected! You can now type messages." + reset)
 	chat(conn)
