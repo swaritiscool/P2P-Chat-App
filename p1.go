@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -65,17 +66,6 @@ func handlePeer(conn net.Conn) {
 	chat(conn)
 }
 
-func send(target string, msg string) {
-	conn, err := net.Dial("tcp", target+":9673")
-	if err != nil {
-		fmt.Printf(bold+magenta+"\nCould not connect to %s: %v\n"+reset, target, err)
-		return
-	}
-	defer conn.Close()
-
-	fmt.Fprintln(conn, msg)
-}
-
 func main() {
 	go listen()
 
@@ -104,7 +94,18 @@ func chat(conn net.Conn) {
 	go func() {
 		scanner := bufio.NewScanner(conn)
 		for scanner.Scan() {
-			fmt.Printf(bold+cyan+"[%s]:"+reset+" %s\n", conn.RemoteAddr().String(), scanner.Text())
+			if strings.HasPrefix(scanner.Text(), "FILE:") {
+				encoded := strings.TrimPrefix(scanner.Text(), "FILE:")
+				encoded, filepath, _ := strings.Cut(encoded, "!")
+				data, err := base64.StdEncoding.DecodeString(encoded)
+				if err != nil {
+					fmt.Printf("Error decoding file: %v\n", err)
+					continue
+				}
+				err = os.WriteFile(strings.Split(filepath, "/")[len(strings.Split(filepath, "/"))-1], data, 0644)
+			} else {
+				fmt.Printf(bold+cyan+"[%s]:"+reset+" %s\n", conn.RemoteAddr().String(), scanner.Text())
+			}
 			fmt.Print(bold + yellow + ">>> " + reset)
 		}
 	}()
@@ -116,6 +117,25 @@ func chat(conn net.Conn) {
 			break
 		}
 		msg := scanner.Text()
-		fmt.Fprintln(conn, msg)
+		if strings.HasPrefix(msg, "FILE:") {
+			filePath := strings.TrimPrefix(msg, "FILE:")
+			err := sendFile(conn, filePath)
+			if err != nil {
+				fmt.Printf("Error sending file: %v\n", err)
+			}
+		} else {
+			fmt.Fprintln(conn, msg)
+		}
 	}
+}
+
+func sendFile(conn net.Conn, filePath string) error {
+	dat, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Println("Error While Reading File: ", err)
+		return err
+	}
+	enc := base64.StdEncoding.EncodeToString(dat)
+	fmt.Fprintln(conn, "FILE:"+enc+"!"+filePath)
+	return nil
 }
